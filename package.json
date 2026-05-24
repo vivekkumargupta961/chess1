@@ -1,0 +1,22 @@
+{
+  "name": "animated-chess",
+  "version": "1.0.0",
+  "description": "Animated chess desktop app with computer and opponent modes.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [
+    "chess",
+    "electron",
+    "game"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.7.5"
+  },
+  "dependencies": {
+    "three": "^0.184.0"
+  }
+}

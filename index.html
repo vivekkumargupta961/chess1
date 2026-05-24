@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Animated Chess</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="game-shell" aria-label="Animated chess game">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Animated Chess</p>
+            <h1>Battle Chess</h1>
+          </div>
+          <div class="status-card">
+            <span id="turnLabel">White to move</span>
+            <strong id="gameStatus">Ready</strong>
+          </div>
+        </header>
+
+        <div class="play-area">
+          <div class="board-wrap">
+            <div class="captured captured-black" id="capturedBlack" aria-label="Captured black pieces"></div>
+            <div class="board-frame">
+              <div class="stage-art" aria-hidden="true"></div>
+              <div class="battle-sky" aria-hidden="true"></div>
+              <div id="moveBanner" class="move-banner" aria-live="polite"></div>
+              <div class="coordinates files top" aria-hidden="true"></div>
+              <div class="rank-files">
+                <div class="coordinates ranks left" aria-hidden="true"></div>
+                <div class="board-stack">
+                  <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+                  <div id="fxLayer" class="fx-layer" aria-hidden="true"></div>
+                  <canvas id="cinematicCanvas" aria-hidden="true"></canvas>
+                </div>
+                <div class="coordinates ranks right" aria-hidden="true"></div>
+              </div>
+              <div class="coordinates files bottom" aria-hidden="true"></div>
+            </div>
+            <div class="captured captured-white" id="capturedWhite" aria-label="Captured white pieces"></div>
+          </div>
+
+          <aside class="panel" aria-label="Game controls and move history">
+            <div class="panel-section">
+              <h2>Play Mode</h2>
+              <div class="mode-row" role="group" aria-label="Choose play mode">
+                <button id="computerModeBtn" class="mode-button active" type="button">Computer</button>
+                <button id="opponentModeBtn" class="mode-button" type="button">Opponent</button>
+              </div>
+            </div>
+            <div class="panel-section">
+              <h2>Controls</h2>
+              <div class="button-row">
+                <button id="newGameBtn" type="button">New Game</button>
+                <button id="flipBtn" type="button">Flip</button>
+                <button id="soundBtn" type="button">Sound On</button>
+              </div>
+            </div>
+            <div class="panel-section">
+              <h2>Move History</h2>
+              <ol id="moveList" class="move-list"></ol>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js"
+        }
+      }
+    </script>
+    <script src="script.js"></script>
+    <script type="module" src="cinematic.js"></script>
+  </body>
+</html>
