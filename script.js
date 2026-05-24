@@ -11,6 +11,8 @@ const soundBtn = document.querySelector("#soundBtn");
 const moveBanner = document.querySelector("#moveBanner");
 const computerModeBtn = document.querySelector("#computerModeBtn");
 const opponentModeBtn = document.querySelector("#opponentModeBtn");
+const difficultySection = document.querySelector(".difficulty-section");
+const difficultyButtons = document.querySelectorAll(".difficulty-button");
 
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const unicodePieces = {
@@ -44,10 +46,32 @@ let legalTargets = [];
 let flipped = false;
 let pieceNodes = new Map();
 let playMode = "computer";
+let computerDifficulty = "balanced";
 let computerThinking = false;
 let computerTimer = null;
 let soundEnabled = true;
 let audioContext = null;
+
+const difficultyProfiles = {
+  training: {
+    label: "Training",
+    thinkTime: 420,
+    randomness: 8,
+    replyDepth: 0,
+  },
+  balanced: {
+    label: "Balanced",
+    thinkTime: 620,
+    randomness: 2.4,
+    replyDepth: 1,
+  },
+  expert: {
+    label: "Expert",
+    thinkTime: 820,
+    randomness: 0.45,
+    replyDepth: 2,
+  },
+};
 
 function newState() {
   const board = Array.from({ length: 8 }, () => Array(8).fill(null));
@@ -100,6 +124,7 @@ function render() {
   renderPieces();
   renderCaptured();
   renderMode();
+  renderDifficulty();
   renderStatus();
   renderHistory();
 }
@@ -231,6 +256,15 @@ function renderMode() {
   boardEl.classList.toggle("thinking", computerThinking);
 }
 
+function renderDifficulty() {
+  difficultySection.classList.toggle("inactive", playMode !== "computer");
+  difficultyButtons.forEach((button) => {
+    const active = button.dataset.difficulty === computerDifficulty;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
 function renderHistory() {
   moveList.innerHTML = state.history.map((move) => `<li>${move}</li>`).join("");
   moveList.scrollTop = moveList.scrollHeight;
@@ -271,6 +305,7 @@ function finishMove(move) {
 
 function queueComputerMove() {
   if (!isComputerTurn() || state.gameOver) return;
+  const profile = difficultyProfiles[computerDifficulty];
   computerThinking = true;
   render();
   window.clearTimeout(computerTimer);
@@ -286,30 +321,110 @@ function queueComputerMove() {
     } else {
       render();
     }
-  }, 560);
+  }, profile.thinkTime);
 }
 
 function chooseComputerMove() {
   const moves = legalMovesForColor("b");
   if (moves.length === 0) return null;
-  const scored = moves.map((move) => {
-    const moving = state.board[move.from.row][move.from.col];
-    const captured = move.enPassant
-      ? state.board[move.from.row][move.to.col]
-      : state.board[move.to.row][move.to.col];
-    let score = Math.random();
-    if (captured) score += pieceValue(captured.type) * 10;
-    if (move.promotion) score += 80;
-    if (move.castle) score += 4;
-    const testBoard = cloneBoard(state.board);
-    applyMoveToBoard(testBoard, move);
-    const enemyKing = findKing(testBoard, "w");
-    if (enemyKing && isSquareAttacked(testBoard, enemyKing.row, enemyKing.col, "b")) score += 16;
-    if (moving.type === "Q" && move.to.row < 3) score -= 2;
-    return { move, score };
-  });
-  scored.sort((a, b) => b.score - a.score);
+  const profile = difficultyProfiles[computerDifficulty];
+  const scored = moves
+    .map((move) => ({
+      move,
+      score: scoreComputerMove(move, profile),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  if (computerDifficulty === "training") {
+    const safePool = scored.slice(0, Math.max(2, Math.ceil(scored.length * 0.55)));
+    const forgivingPick = Math.floor(Math.random() * safePool.length);
+    return safePool[forgivingPick].move;
+  }
+
   return scored[0].move;
+}
+
+function scoreComputerMove(move, profile) {
+  const testBoard = cloneBoard(state.board);
+  const tacticalScore = scoreImmediateMove(state.board, move, "b");
+  applyMoveToBoard(testBoard, move);
+
+  let score = tacticalScore + evaluateBoard(testBoard);
+  if (profile.replyDepth >= 1) {
+    score -= bestReplyScore(testBoard, "w") * (profile.replyDepth === 2 ? 0.82 : 0.55);
+  }
+  if (profile.replyDepth >= 2) {
+    score += bestReplyScore(testBoard, "b") * 0.26;
+  }
+
+  return score + (Math.random() - 0.5) * profile.randomness;
+}
+
+function scoreImmediateMove(board, move, color) {
+  const moving = board[move.from.row][move.from.col];
+  const captured = move.enPassant ? board[move.from.row][move.to.col] : board[move.to.row][move.to.col];
+  let score = 0;
+  if (captured) score += pieceValue(captured.type) * 12 - pieceValue(moving.type) * 0.45;
+  if (move.promotion) score += 90;
+  if (move.castle) score += 8;
+
+  const testBoard = cloneBoard(board);
+  applyMoveToBoard(testBoard, move);
+  const enemyKing = findKing(testBoard, opposite(color));
+  if (enemyKing && isSquareAttacked(testBoard, enemyKing.row, enemyKing.col, color)) score += 18;
+  if (isSquareAttacked(testBoard, move.to.row, move.to.col, opposite(color))) {
+    score -= pieceValue(moving.type) * 2.6;
+  }
+  if (moving.type === "Q" && move.to.row < 3) score -= 2;
+  return color === "b" ? score : -score;
+}
+
+function bestReplyScore(board, color) {
+  const replies = legalMovesForBoard(board, color);
+  if (replies.length === 0) {
+    const king = findKing(board, color);
+    return king && isSquareAttacked(board, king.row, king.col, opposite(color)) ? 120 : 0;
+  }
+  return Math.max(...replies.map((reply) => Math.abs(scoreImmediateMove(board, reply, color))));
+}
+
+function evaluateBoard(board) {
+  let score = 0;
+  forEachPiece(board, (p, row, col) => {
+    const side = p.color === "b" ? 1 : -1;
+    score += side * pieceValue(p.type) * 10;
+    score += side * developmentBonus(p, row, col);
+  });
+  score += legalMovesForBoard(board, "b").length * 0.18;
+  score -= legalMovesForBoard(board, "w").length * 0.14;
+  return score;
+}
+
+function developmentBonus(p, row, col) {
+  const centerDistance = Math.abs(3.5 - row) + Math.abs(3.5 - col);
+  let bonus = (7 - centerDistance) * 0.22;
+  if ((p.type === "N" || p.type === "B") && ((p.color === "b" && row > 0) || (p.color === "w" && row < 7))) {
+    bonus += 1.2;
+  }
+  if (p.type === "P") {
+    bonus += p.color === "b" ? row * 0.18 : (7 - row) * 0.18;
+  }
+  if (p.type === "K" && ((p.color === "b" && row === 0 && col > 4) || (p.color === "w" && row === 7 && col > 4))) {
+    bonus += 0.8;
+  }
+  return bonus;
+}
+
+function legalMovesForBoard(board, color) {
+  return withTemporaryState({ ...state, board, turn: color, enPassant: null }, () => legalMovesForColor(color));
+}
+
+function withTemporaryState(nextState, callback) {
+  const previousState = state;
+  state = nextState;
+  const result = callback();
+  state = previousState;
+  return result;
 }
 
 function animateMovedPiece(move) {
@@ -654,6 +769,7 @@ function applyMoveToBoard(board, move) {
   board[move.from.row][move.from.col] = null;
   if (move.enPassant) board[move.from.row][move.to.col] = null;
   board[move.to.row][move.to.col] = moving;
+  if (move.promotion) moving.type = move.promotion;
   if (move.castle) {
     const rookFromCol = move.castle === "king" ? 7 : 0;
     const rookToCol = move.castle === "king" ? 5 : 3;
@@ -786,6 +902,14 @@ computerModeBtn.addEventListener("click", () => {
 opponentModeBtn.addEventListener("click", () => {
   playMode = "opponent";
   resetGame();
+});
+
+difficultyButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    computerDifficulty = button.dataset.difficulty;
+    playMode = "computer";
+    resetGame();
+  });
 });
 
 setupBoard();
