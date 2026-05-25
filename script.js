@@ -13,6 +13,15 @@ const computerModeBtn = document.querySelector("#computerModeBtn");
 const opponentModeBtn = document.querySelector("#opponentModeBtn");
 const difficultySection = document.querySelector(".difficulty-section");
 const difficultyButtons = document.querySelectorAll(".difficulty-button");
+const playerNameInput = document.querySelector("#playerNameInput");
+const resetRecordBtn = document.querySelector("#resetRecordBtn");
+const recordGames = document.querySelector("#recordGames");
+const recordWinRate = document.querySelector("#recordWinRate");
+const recordAccuracy = document.querySelector("#recordAccuracy");
+const coachTitle = document.querySelector("#coachTitle");
+const coachTip = document.querySelector("#coachTip");
+const insightList = document.querySelector("#insightList");
+const gameArchiveList = document.querySelector("#gameArchiveList");
 
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const unicodePieces = {
@@ -51,6 +60,8 @@ let computerThinking = false;
 let computerTimer = null;
 let soundEnabled = true;
 let audioContext = null;
+const recordStorageKey = "battleChess.playerRecord.v1";
+let playerRecord = loadPlayerRecord();
 
 const difficultyProfiles = {
   training: {
@@ -92,11 +103,27 @@ function newState() {
     castling: { wK: true, wQ: true, bK: true, bQ: true },
     enPassant: null,
     gameOver: false,
+    recordedComplete: false,
+    insights: [],
+    session: newSessionStats(),
   };
 }
 
 function piece(color, type) {
   return { color, type, id: `${color}${type}-${crypto.randomUUID()}` };
+}
+
+function newSessionStats() {
+  return {
+    id: crypto.randomUUID(),
+    startedAt: Date.now(),
+    trackedMoves: 0,
+    captures: 0,
+    mistakes: 0,
+    cautions: 0,
+    excellent: 0,
+    saved: false,
+  };
 }
 
 function setupBoard() {
@@ -127,6 +154,7 @@ function render() {
   renderDifficulty();
   renderStatus();
   renderHistory();
+  renderRecord();
 }
 
 function renderSquares() {
@@ -241,9 +269,11 @@ function renderStatus() {
   if (moves.length === 0 && inCheck) {
     state.gameOver = true;
     gameStatus.textContent = `Checkmate, ${opposite(state.turn) === "w" ? "White" : "Black"} wins`;
+    recordGameComplete(opposite(state.turn));
   } else if (moves.length === 0) {
     state.gameOver = true;
     gameStatus.textContent = "Stalemate";
+    recordGameComplete(null);
   } else {
     gameStatus.textContent = computerThinking ? "Thinking..." : inCheck ? "Check" : "Ready";
   }
@@ -268,6 +298,61 @@ function renderDifficulty() {
 function renderHistory() {
   moveList.innerHTML = state.history.map((move) => `<li>${move}</li>`).join("");
   moveList.scrollTop = moveList.scrollHeight;
+}
+
+function renderRecord() {
+  if (!playerNameInput) return;
+  if (document.activeElement !== playerNameInput) playerNameInput.value = playerRecord.name;
+  recordGames.textContent = String(playerRecord.gameArchive.length);
+  recordWinRate.textContent = `${playerRecord.games ? Math.round((playerRecord.wins / playerRecord.games) * 100) : 0}%`;
+  recordAccuracy.textContent = `${playerAccuracy()}%`;
+
+  const latest = state.insights[0] || playerRecord.recent[0];
+  if (latest) {
+    coachTitle.textContent = latest.level === "mistake" ? "Improve This Move" : latest.level === "caution" ? "Coach Note" : "Good Move";
+    coachTip.textContent = latest.tip;
+  } else {
+    coachTitle.textContent = "Coach Ready";
+    coachTip.textContent = "Play a move to start building your improvement record.";
+  }
+
+  insightList.innerHTML = state.insights
+    .slice(0, 4)
+    .map((insight) => `<li class="${insight.level}"><strong>${insight.move}</strong><span>${insight.tip}</span></li>`)
+    .join("");
+  renderGameArchive();
+}
+
+function renderGameArchive() {
+  if (!gameArchiveList) return;
+  const games = playerRecord.gameArchive.slice(0, 8);
+  if (!games.length) {
+    gameArchiveList.innerHTML = `<p class="empty-archive">Previous games will appear by date after you finish or start a new game.</p>`;
+    return;
+  }
+  gameArchiveList.innerHTML = games
+    .map((game) => {
+      const moves = Array.isArray(game.moves) ? game.moves : [];
+      const insights = Array.isArray(game.insights) ? game.insights : [];
+      return `
+        <details class="game-record">
+          <summary>
+            <span>${game.dateLabel} ${game.timeLabel}</span>
+            <strong>${game.result}</strong>
+          </summary>
+          <div class="game-record-body">
+            <div class="game-record-stats">
+              <span>${game.mode}</span>
+              <span>${moves.length} moves</span>
+              <span>${game.accuracy}% accuracy</span>
+            </div>
+            <ol>${moves.slice(-8).map((move) => `<li>${move}</li>`).join("")}</ol>
+            ${insights.length ? `<p>${insights[0].tip}</p>` : `<p>No coach warning recorded for this game.</p>`}
+          </div>
+        </details>
+      `;
+    })
+    .join("");
 }
 
 function handleSquareClick(row, col) {
@@ -471,6 +556,7 @@ function isComputerTurn() {
 function resetGame() {
   window.clearTimeout(computerTimer);
   computerThinking = false;
+  saveCurrentGameRecord("Practice saved", null, { countGame: state && state.history.length > 0, completed: false });
   state = newState();
   selected = null;
   legalTargets = [];
@@ -486,6 +572,7 @@ function makeMove(move) {
     : state.board[move.to.row][move.to.col];
   const moveSoundType = moving.type;
   const notation = moveNotation(moving, move, captured);
+  const analysis = shouldTrackMove(moving.color) ? analyzePlayerMove(move, moving, captured) : null;
 
   if (captured) state.captured[captured.color].push(captured);
   state.board[move.from.row][move.from.col] = null;
@@ -508,6 +595,7 @@ function makeMove(move) {
       : null;
   state.lastMove = { from: move.from, to: move.to };
   state.history.push(notation);
+  if (analysis) recordPlayerMove(analysis, notation, Boolean(captured));
   playPieceSound(moveSoundType, Boolean(captured), moving.color);
   showMoveBanner(moveSoundType, moving.color, Boolean(captured));
   window.dispatchEvent(
@@ -524,6 +612,206 @@ function makeMove(move) {
     }),
   );
   state.turn = opposite(state.turn);
+}
+
+function loadPlayerRecord() {
+  const fallback = {
+    name: "Player",
+    games: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    moves: 0,
+    captures: 0,
+    mistakes: 0,
+    cautions: 0,
+    excellent: 0,
+    recent: [],
+    gameArchive: [],
+  };
+  try {
+    const saved = { ...fallback, ...JSON.parse(localStorage.getItem(recordStorageKey) || "{}") };
+    saved.gameArchive = Array.isArray(saved.gameArchive) ? saved.gameArchive : [];
+    saved.recent = Array.isArray(saved.recent) ? saved.recent : [];
+    return saved;
+  } catch {
+    return fallback;
+  }
+}
+
+function savePlayerRecord() {
+  localStorage.setItem(recordStorageKey, JSON.stringify(playerRecord));
+}
+
+function playerAccuracy() {
+  if (!playerRecord.moves) return 100;
+  const penalty = playerRecord.mistakes * 14 + playerRecord.cautions * 6;
+  return Math.max(0, Math.min(100, Math.round(100 - penalty / playerRecord.moves)));
+}
+
+function sessionAccuracy(session) {
+  if (!session.trackedMoves) return 100;
+  const penalty = session.mistakes * 14 + session.cautions * 6;
+  return Math.max(0, Math.min(100, Math.round(100 - penalty / session.trackedMoves)));
+}
+
+function shouldTrackMove(color) {
+  return playMode === "opponent" || color === "w";
+}
+
+function analyzePlayerMove(move, moving, captured) {
+  const candidates = legalMovesForColor(moving.color);
+  const scored = candidates
+    .map((candidate) => ({
+      move: candidate,
+      score: scorePlayerMove(candidate, moving.color),
+    }))
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  const chosen = scored.find((item) => sameMove(item.move, move)) || { move, score: scorePlayerMove(move, moving.color) };
+  const loss = best ? best.score - chosen.score : 0;
+  const level = loss >= 10 ? "mistake" : loss >= 4 ? "caution" : "good";
+  return {
+    level,
+    loss,
+    tip: moveCoachTip(move, moving, captured, best && best.move, level),
+  };
+}
+
+function scorePlayerMove(move, color) {
+  const moving = state.board[move.from.row][move.from.col];
+  const testBoard = cloneBoard(state.board);
+  const captured = move.enPassant ? state.board[move.from.row][move.to.col] : state.board[move.to.row][move.to.col];
+  applyMoveToBoard(testBoard, move);
+
+  let score = evaluateMaterialForColor(testBoard, color) * 10;
+  score += legalMovesForBoard(testBoard, color).length * 0.16;
+  if (captured) score += pieceValue(captured.type) * 1.8;
+  if (move.castle) score += 3;
+  if (move.promotion) score += 10;
+
+  const enemyKing = findKing(testBoard, opposite(color));
+  if (enemyKing && isSquareAttacked(testBoard, enemyKing.row, enemyKing.col, color)) score += 5;
+  if (moving && isSquareAttacked(testBoard, move.to.row, move.to.col, opposite(color))) {
+    score -= pieceValue(moving.type) * 4.2;
+  }
+  return score;
+}
+
+function evaluateMaterialForColor(board, color) {
+  let score = 0;
+  forEachPiece(board, (p) => {
+    score += (p.color === color ? 1 : -1) * pieceValue(p.type);
+  });
+  return score;
+}
+
+function moveCoachTip(move, moving, captured, bestMove, level) {
+  const bestCaptured = bestMove && targetForMove(bestMove);
+  const movedToDanger = moveLeavesPieceAttacked(move, moving.color);
+  const moveText = bestMove ? `${pieceRoles[moving.type]} ${squareName(bestMove.from.row, bestMove.from.col)}-${squareName(bestMove.to.row, bestMove.to.col)}` : "";
+
+  if (level === "good") {
+    if (captured) return "Good capture. You won material and kept pressure on the opponent.";
+    if (move.castle) return "Good safety move. Castling protects the king and connects your forts.";
+    return "Solid move. Keep building control before attacking.";
+  }
+  if (bestCaptured && !captured) {
+    return `You missed a stronger capture. Better: ${moveText} to take the opponent ${pieceRoles[bestCaptured.type]}.`;
+  }
+  if (movedToDanger) {
+    return `This ${pieceRoles[moving.type]} can be attacked after moving. Check if the destination is protected first.`;
+  }
+  if (bestMove) {
+    return `A stronger option was ${moveText}. Look for captures, checks, and safer squares before moving.`;
+  }
+  return "This move needs care. Before moving, check captures, checks, and whether your piece becomes unsafe.";
+}
+
+function moveLeavesPieceAttacked(move, color) {
+  const testBoard = cloneBoard(state.board);
+  applyMoveToBoard(testBoard, move);
+  return isSquareAttacked(testBoard, move.to.row, move.to.col, opposite(color));
+}
+
+function targetForMove(move) {
+  return move.enPassant ? state.board[move.from.row][move.to.col] : state.board[move.to.row][move.to.col];
+}
+
+function sameMove(a, b) {
+  return (
+    a.from.row === b.from.row &&
+    a.from.col === b.from.col &&
+    a.to.row === b.to.row &&
+    a.to.col === b.to.col &&
+    (a.promotion || null) === (b.promotion || null) &&
+    (a.castle || null) === (b.castle || null)
+  );
+}
+
+function recordPlayerMove(analysis, notation, captured) {
+  playerRecord.moves += 1;
+  if (captured) playerRecord.captures += 1;
+  if (analysis.level === "mistake") playerRecord.mistakes += 1;
+  if (analysis.level === "caution") playerRecord.cautions += 1;
+  if (analysis.level === "good") playerRecord.excellent += 1;
+  state.session.trackedMoves += 1;
+  if (captured) state.session.captures += 1;
+  if (analysis.level === "mistake") state.session.mistakes += 1;
+  if (analysis.level === "caution") state.session.cautions += 1;
+  if (analysis.level === "good") state.session.excellent += 1;
+
+  const insight = {
+    move: notation,
+    level: analysis.level,
+    tip: analysis.tip,
+    at: new Date().toLocaleString(),
+  };
+  state.insights.unshift(insight);
+  playerRecord.recent.unshift(insight);
+  playerRecord.recent = playerRecord.recent.slice(0, 12);
+  savePlayerRecord();
+}
+
+function recordGameComplete(winner) {
+  if (state.recordedComplete) return;
+  state.recordedComplete = true;
+  const result = !winner ? "Draw" : winner === "w" ? "White won" : "Black won";
+  saveCurrentGameRecord(result, winner, { countGame: true, completed: true });
+}
+
+function saveCurrentGameRecord(result, winner, options = {}) {
+  if (!state || state.session.saved || !options.countGame) return;
+  state.session.saved = true;
+  const completed = options.completed === true;
+
+  const date = new Date();
+  const game = {
+    id: state.session.id,
+    date: date.toISOString(),
+    dateLabel: date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }),
+    timeLabel: date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+    result,
+    completed,
+    winner: completed ? winner : "practice",
+    mode: playMode === "computer" ? `Computer: ${difficultyProfiles[computerDifficulty].label}` : "Opponent",
+    moves: state.history.slice(),
+    insights: state.insights.slice(0, 5),
+    accuracy: sessionAccuracy(state.session),
+    mistakes: state.session.mistakes,
+    cautions: state.session.cautions,
+    captures: state.session.captures,
+  };
+
+  playerRecord.gameArchive.unshift(game);
+  playerRecord.gameArchive = playerRecord.gameArchive.slice(0, 30);
+  if (completed) {
+    playerRecord.games += 1;
+    if (winner === "w") playerRecord.wins += 1;
+    else if (winner === "b") playerRecord.losses += 1;
+    else playerRecord.draws += 1;
+  }
+  savePlayerRecord();
 }
 
 function unlockAudio() {
@@ -895,21 +1183,52 @@ soundBtn.addEventListener("click", () => {
 });
 
 computerModeBtn.addEventListener("click", () => {
-  playMode = "computer";
   resetGame();
+  playMode = "computer";
+  render();
 });
 
 opponentModeBtn.addEventListener("click", () => {
-  playMode = "opponent";
   resetGame();
+  playMode = "opponent";
+  render();
 });
 
 difficultyButtons.forEach((button) => {
   button.addEventListener("click", () => {
+    resetGame();
     computerDifficulty = button.dataset.difficulty;
     playMode = "computer";
-    resetGame();
+    render();
   });
+});
+
+playerNameInput.addEventListener("input", () => {
+  playerRecord.name = playerNameInput.value.trim() || "Player";
+  savePlayerRecord();
+  renderRecord();
+});
+
+resetRecordBtn.addEventListener("click", () => {
+  playerRecord = loadPlayerRecord();
+  playerRecord.games = 0;
+  playerRecord.wins = 0;
+  playerRecord.losses = 0;
+  playerRecord.draws = 0;
+  playerRecord.moves = 0;
+  playerRecord.captures = 0;
+  playerRecord.mistakes = 0;
+  playerRecord.cautions = 0;
+  playerRecord.excellent = 0;
+  playerRecord.recent = [];
+  playerRecord.gameArchive = [];
+  if (state) state.insights = [];
+  savePlayerRecord();
+  renderRecord();
+});
+
+window.addEventListener("beforeunload", () => {
+  saveCurrentGameRecord("Practice saved", null, { countGame: state && state.history.length > 0, completed: false });
 });
 
 setupBoard();

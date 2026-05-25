@@ -66,6 +66,39 @@
                 <button id="soundBtn" type="button">Sound On</button>
               </div>
             </div>
+            <div class="panel-section record-section">
+              <div class="section-heading">
+                <h2>Player Progress</h2>
+                <button id="resetRecordBtn" class="text-button" type="button">Reset</button>
+              </div>
+              <label class="player-field" for="playerNameInput">
+                <span>Player Name</span>
+                <input id="playerNameInput" type="text" maxlength="24" autocomplete="off" />
+              </label>
+              <div class="record-grid" aria-label="Player record">
+                <div>
+                  <span>Games</span>
+                  <strong id="recordGames">0</strong>
+                </div>
+                <div>
+                  <span>Win Rate</span>
+                  <strong id="recordWinRate">0%</strong>
+                </div>
+                <div>
+                  <span>Accuracy</span>
+                  <strong id="recordAccuracy">100%</strong>
+                </div>
+              </div>
+              <div class="coach-card">
+                <strong id="coachTitle">Coach Ready</strong>
+                <p id="coachTip">Play a move to start building your improvement record.</p>
+              </div>
+              <ul id="insightList" class="insight-list"></ul>
+              <div class="archive-heading">
+                <h3>Previous Games</h3>
+              </div>
+              <div id="gameArchiveList" class="game-archive-list" aria-label="Previous game records"></div>
+            </div>
             <div class="panel-section">
               <h2>Move History</h2>
               <ol id="moveList" class="move-list"></ol>
