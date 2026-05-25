@@ -159,16 +159,6 @@ function renderSquares() {
 
 function renderPieces() {
   const liveIds = new Set();
-  const captureTargetIds = new Set();
-  legalTargets
-    .filter((move) => move.capture || move.enPassant)
-    .forEach((move) => {
-      const target = move.enPassant
-        ? state.board[move.from.row][move.to.col]
-        : state.board[move.to.row][move.to.col];
-      if (target) captureTargetIds.add(target.id);
-    });
-
   forEachPiece(state.board, (p, row, col) => {
     liveIds.add(p.id);
     let node = pieceNodes.get(p.id);
@@ -187,7 +177,6 @@ function renderPieces() {
     node.setAttribute("aria-label", `${p.color === "w" ? "White" : "Black"} ${pieceNames[p.type]}`);
     node.style.transform = pieceTransform(row, col);
     node.style.zIndex = String(20 + (flipped ? 7 - row : row));
-    node.classList.toggle("targeted", captureTargetIds.has(p.id));
   });
 
   pieceNodes.forEach((node, id) => {
